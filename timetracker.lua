@@ -4,11 +4,49 @@
 -- 	:StartTimer -- begin tracking time
 -- 	:StopTimer  -- stop tracking time
 
+local vim = vim
+local json = vim.fn.json_encode and vim.fn or require("vim.json")
+
 local M = {}
-local timer = { 
-	current = nil,
-	sessions = {}
-}
+
+-- Get the project root
+local function get_project_root()
+	local cwd = vim.fn.getcwd()
+	-- try getting the git root if available
+	local git_root = vim.fn.systemlist("git rev-parse --show-toplevel")[1]
+	if vim.v.shell_error == 0 and git_root and git_root ~= "" then
+		return git_root
+	else
+		return cwd
+	end
+end
+
+-- Get storage file
+local function get_storage_file()
+	local root = get_project_root()
+	return root .. "/.timetracker_sessions.json"
+end
+
+-- Load existing sessions from file
+local function load_sessions()
+	local path = get_storage_file()
+	if vim.fn.filereadable(path) == 1 then
+		local data = vim.fn.readfile(path)
+		local text = table.concat(data, "\n")
+		local ok, tbl = pcall(vim.fn.json_decode, text)
+		if ok and type(tbl) == "table" then
+			return tbl
+		end
+	end
+	return {}
+end
+
+-- Save sessions to file
+local function save_sessions(sessions)
+	local path = get_storage_file()
+	local json_text = vim.fn.json_encode(sessions)
+	vim.fn.writefile(vim.fn.split(json_text, "\n"), path)
+end
 
 -- Helper function to get the user id
 local function get_user_id()
@@ -27,14 +65,19 @@ local function get_git_branch()
 	return nil
 end
 
+local state = {
+	current = nil,
+	sessions = load_sessions()
+}
+
 function M.StartTimer()
-	if timer.current then
+	if state.current then
 		print("Timer is already running")
 	else
 		local start_time = os.time()
 		local user_id = get_user_id()
 		local branch = get_git_branch()
-		timer.current = {
+		state.current = {
 			start_time = start_time,
 			user_id = user_id,
 			branch = branch
@@ -44,15 +87,16 @@ function M.StartTimer()
 end
 
 function M.StopTimer()
-	if not timer.current then
+	if not state.current then
 		print("No timer is running")
 	else
 		local stop_time = os.time()
-		local session = timer.current
+		local session = state.current
 		session.stop_time = stop_time
 		session.elapsed = stop_time - session.start_time
-		table.insert(timer.sessions, session)
-		timer.current = nil
+		table.insert(state.sessions, session)
+		save_sessions(state.sessions)
+		state.current = nil
 
 		print(string.format("Timer stopped. User: %s, Branch: %s, Elapsed: %s seconds", session.user_id, session.branch, session.elapsed))
 	end
