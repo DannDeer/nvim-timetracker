@@ -102,7 +102,22 @@ function M.StopTimer()
 	end
 end
 
+function M.ListSessions()
+	for i, s in ipairs(state.sessions) do
+		print(string.format(
+			"%d: %s -> %s | user: %s | branch: %s | %.2f mins",
+			i,
+			os.date("%Y-%m-%d %X", s.start_time),
+			os.date("%Y-%m-%d %X", s.stop_time),
+			s.user_id,
+			s.branch,
+			s.elapsed / 60
+		))
+	end
+end
+
 vim.api.nvim_create_user_command("StartTimer", function() M.StartTimer() end, {})
 vim.api.nvim_create_user_command("StopTimer", function() M.StopTimer() end, {})
+vim.api.nvim_create_user_command("ListSessions", function() M.ListSessions() end, {})
 
 return M
