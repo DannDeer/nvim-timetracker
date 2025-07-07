@@ -5,25 +5,56 @@
 -- 	:StopTimer  -- stop tracking time
 
 local M = {}
-local timer = { start_time = nil }
+local timer = { 
+	current = nil,
+	sessions = {}
+}
+
+-- Helper function to get the user id
+local function get_user_id()
+	return os.getenv("USER") or vim.loop.os_get_passwd().username or "unknown"
+end
+
+-- Helper function to get current git branch
+local function get_git_branch()
+	local cwd = vim.fn.getcwd()
+	if vim.fn.isdirectory(cwd .. "/.git") == 1 or vim.fn.systemlist("git rev-parse --git-dir", cwd)[1] ~= nil then
+		local result = vim.fn.systemlist("git rev-parse --abbrev-ref HEAD")
+		if vim.v.shell_error == 0 and result[1] then
+			return result[1]
+		end
+	end
+	return nil
+end
 
 function M.StartTimer()
-	if timer.start_time then
+	if timer.current then
 		print("Timer is already running")
 	else
-		timer.start_time = os.time()
-		local start_str = os.date("%X", timer.start_time)
-		print("Timer started at " .. start_str)
+		local start_time = os.time()
+		local user_id = get_user_id()
+		local branch = get_git_branch()
+		timer.current = {
+			start_time = start_time,
+			user_id = user_id,
+			branch = branch
+		}
+		print(string.format("Timer started at %s (user: %s, branch: %s)", os.date("%X", start_time), user_id, branch or "none"))
 	end
 end
 
 function M.StopTimer()
-	if not timer.start_time then
+	if not timer.current then
 		print("No timer is running")
 	else
-		local elapsed = os.time() - timer.start_time
-		timer.start_time = nil
-		print("Timer stopped. Elapsed time: " .. elapsed .. " seconds")
+		local stop_time = os.time()
+		local session = timer.current
+		session.stop_time = stop_time
+		session.elapsed = stop_time - session.start_time
+		table.insert(timer.sessions, session)
+		timer.current = nil
+
+		print(string.format("Timer stopped. User: %s, Branch: %s, Elapsed: %s seconds", session.user_id, session.branch, session.elapsed))
 	end
 end
 
