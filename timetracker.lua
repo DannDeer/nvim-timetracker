@@ -9,6 +9,30 @@ local json = vim.fn.json_encode and vim.fn or require("vim.json")
 
 local M = {}
 
+M.config = {
+	auto_start = false,
+	auto_stop = false,
+	name = nil
+}
+
+function M.setup(opts)
+	opts = opts or {}
+	for k, v in pairs(opts) do
+		if M.config[k] ~= nil then
+			M.config[k] = v
+		end
+	end
+	-- Register commands based on config
+	if M.config.auto_start then
+		vim.api.nvim_create_autocmd("VimEnter", {callback = M.startTimer })
+	end
+	if M.config.auto_stop then
+		vim.api.nvim_create_autocmd("VimLeavePre", { callback = function()
+			if state.current then M.StopTimer() end
+		end })
+	end
+end
+
 -- Get the project root
 local function get_project_root()
 	local cwd = vim.fn.getcwd()
@@ -43,6 +67,9 @@ end
 
 -- Save sessions to file
 local function save_sessions(sessions)
+	if M.config.name then
+		return M.config.name
+	end
 	local path = get_storage_file()
 	local json_text = vim.fn.json_encode(sessions)
 	vim.fn.writefile(vim.fn.split(json_text, "\n"), path)
@@ -82,7 +109,8 @@ function M.StartTimer()
 			user_id = user_id,
 			branch = branch
 		}
-		print(string.format("Timer started at %s (user: %s, branch: %s)", os.date("%X", start_time), user_id, branch or "none"))
+		print(string.format("Timer started at %s (user: %s, branch: %s)", os.date("%X", start_time), user_id,
+			branch or "none"))
 	end
 end
 
@@ -98,35 +126,55 @@ function M.StopTimer()
 		save_sessions(state.sessions)
 		state.current = nil
 
-		print(string.format("Timer stopped. User: %s, Branch: %s, Elapsed: %s seconds", session.user_id, session.branch, session.elapsed))
+		print(string.format("Timer stopped. User: %s, Branch: %s, Elapsed: %s seconds", session.user_id, session.branch,
+			session.elapsed))
 	end
 end
 
-function M.ListSessions()
+-- Show sessions in a floating window UI
+function M.ShowSessions()
+	-- Prepare buffer
+	local buf = vim.api.nvim_create_buf(false, true)
+	local total_elapsed = 0
+	-- Format lines
+	local lines = { string.format("%-3s %-19s %-19s %-6s %-10s %s", "#", "Start", "Stop", "Mins", "User", "Branch") }
 	for i, s in ipairs(state.sessions) do
-		print(string.format(
-			"%d: %s -> %s | user: %s | branch: %s | %.2f mins",
-			i,
-			os.date("%Y-%m-%d %X", s.start_time),
-			os.date("%Y-%m-%d %X", s.stop_time),
-			s.user_id,
-			s.branch,
-			s.elapsed / 60
-		))
+		total_elapsed  = total_elapsed + s.elapsed
+		local start_str = os.date("%Y-%m-%d %H:%M", s.start_time)
+		local stop_str = os.date("%Y-%m-%d %H:%M", s.stop_time)
+		local mins = string.format("%.2f", s.elapsed / 60)
+		lines[#lines + 1] = string.format("%-3d %-19s %-19s %-6s %-10s %s",
+			i, start_str, stop_str, mins, s.user_id, s.branch or "-")
 	end
+	-- Blank line and totals
+	lines[#lines + 1] = ""
+	local total_mins = string.format("%.2f mins", total_elapsed / 60)
+	lines [#lines + 1] = string.format("Total sessions: %d    Total time: %s", #state.sessions, total_mins)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	-- Window dimensions
+	local width = math.floor(vim.o.columns * 0.8)
+	local height = math.floor(vim.o.lines * 0.6)
+	local row = math.floor((vim.o.lines - height) / 2)
+	local col = math.floor((vim.o.columns - width) / 2)
+	-- Open floating window
+	local win = vim.api.nvim_open_win(buf, true, {
+		relative = 'editor',
+		width = width,
+		height = height,
+		row = row,
+		col = col,
+		style = 'minimal',
+		border = 'rounded'
+	})
+	-- Set options
+	vim.api.nvim_win_set_option(win, 'cursorline', true)
+	-- Keymaps to close
+	vim.api.nvim_buf_set_keymap(buf, 'n', 'q', '<cmd>bd!<CR>', { silent = true, noremap = true })
+	vim.api.nvim_buf_set_keymap(buf, 'n', '<Esc>', '<cmd>bd!<CR>', { silent = true, noremap = true })
 end
 
 vim.api.nvim_create_user_command("StartTimer", function() M.StartTimer() end, {})
 vim.api.nvim_create_user_command("StopTimer", function() M.StopTimer() end, {})
-vim.api.nvim_create_user_command("ListSessions", function() M.ListSessions() end, {})
-
--- Stop the timer if nvim is closed
-vim.api.nvim_create_autocmd("VimLeavePre", {
-	callback = function()
-		if state.current then
-			M.StopTimer()
-		end
-	end
-})
+vim.api.nvim_create_user_command("ShowSessions", function() M.ShowSessions() end, {})
 
 return M
