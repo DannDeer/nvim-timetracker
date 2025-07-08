@@ -120,4 +120,13 @@ vim.api.nvim_create_user_command("StartTimer", function() M.StartTimer() end, {}
 vim.api.nvim_create_user_command("StopTimer", function() M.StopTimer() end, {})
 vim.api.nvim_create_user_command("ListSessions", function() M.ListSessions() end, {})
 
+-- Stop the timer if nvim is closed
+vim.api.nvim_create_autocmd("VimLeavePre", {
+	callback = function()
+		if state.current then
+			M.StopTimer()
+		end
+	end
+})
+
 return M
