@@ -6,6 +6,8 @@
 local opts = {
   auto_start = false,
   auto_stop  = false,
+  auto_gitignore = false,
+  show_session_on_start = false,
   name       = nil,
 }
 
