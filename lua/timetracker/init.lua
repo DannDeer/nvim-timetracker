@@ -3,7 +3,6 @@
 
 local vim = vim
 
--- Native JSON API
 local json_decode = vim.fn.json_decode
 local json_encode = vim.fn.json_encode
 
@@ -20,6 +19,9 @@ M.config = {
 local state = {
   current  = nil,
   sessions = {},
+  timer_handle = nil,
+  win_id = nil,
+  buf_id = nil,
 }
 
 -- Helpers
@@ -87,6 +89,7 @@ function M.setup(opts)
   vim.api.nvim_create_user_command('StartTimer',  M.StartTimer,  {})
   vim.api.nvim_create_user_command('StopTimer',   M.StopTimer,   {})
   vim.api.nvim_create_user_command('ShowSessions',M.ShowSessions,{})
+  vim.api.nvim_create_user_command('ShowCurrentSession', M.ShowCurrentSession, {})
 
   -- auto‐start/stop
   if M.config.auto_start then
@@ -141,6 +144,8 @@ end
 function M.ShowSessions()
   local buf = vim.api.nvim_create_buf(false, true)
   local lines = {
+	'',
+	'',
     string.format('%-3s %-19s %-19s %-6s %-10s %s',
       '#', 'Start', 'Stop', 'Mins', 'User', 'Branch')
   }
@@ -155,8 +160,7 @@ function M.ShowSessions()
       i, starts, stops, mins, s.user_id, s.branch or '-'
     )
   end
-  lines[#lines+1] = ''
-  lines[#lines+1] = string.format(
+  lines[1] = string.format(
     'Total sessions: %d   Total time: %.2f mins',
     #state.sessions, total/60
   )
@@ -173,6 +177,54 @@ function M.ShowSessions()
   vim.api.nvim_win_set_option(win,'cursorline',true)
   vim.api.nvim_buf_set_keymap(buf,'n','q','<cmd>bd!<CR>',{noremap=true,silent=true})
   vim.api.nvim_buf_set_keymap(buf,'n','<Esc>','<cmd>bd!<CR>',{noremap=true,silent=true})
+end
+
+function M.ShowCurrentSession()
+	-- If there is no active timer
+	if not state.current then
+		print("No active timer to display")
+		return
+	end
+	-- If there is already a timer window open
+	if state.win_id and vim.api.nvim_win_is_valid(state.win_id) then
+		vim.api.nvim_win_close(state.win_id, true)
+		state.win_id = nil
+		if state.timer_handle then
+			state.timer_handle:stop()
+			state.timer_handle:close()
+			state.timer_handle = nil
+		end
+		return
+	end
+	local function get_text()
+		local elapsed = os.time() - state.current.start_time
+    	return string.format('Elapsed: %02d:%02d', math.floor(elapsed/60), elapsed%60)
+	end
+	local text = get_text()
+	local w = #text
+	local h = 1
+	-- Create buffer/window
+	state.buf_id = vim.api.nvim_create_buf(false, true)
+	local ui = vim.api.nvim_list_uis()[1]
+	local row = ui.height - 3
+	local col = ui.width - w
+	state.win_id = vim.api.nvim_open_win(state.buf_id, false, {
+		relative='editor', width=w, height=h,
+		row=row, col=col, style='minimal'
+	})
+	-- Update function for the timer window
+	local function update()
+		if not state.current or not vim.api.nvim_win_is_valid(state.win_id) then return end
+		local new_text = get_text()
+		vim.api.nvim_buf_set_lines(state.buf_id, 0, -1, false, {new_text})
+		local new_width = #text
+		vim.api.nvim_win_set_width(state.win_id, new_width)
+		vim.api.nvim_win_set_config(state.win_id, {relative = 'editor', row = row, col = ui.width - new_width})
+	end
+	-- Initial update
+	update()
+	state.timer_handle = vim.loop.new_timer()
+	state.timer_handle:start(1000, 1000, vim.schedule_wrap(update))
 end
 
 return M
