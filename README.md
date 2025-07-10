@@ -27,7 +27,7 @@ Add the following to your `init.lua`:
 ```lua
 require("lazy").setup({
   {
-    "DannDot/nvim-timetracker", -- Replace with your GitHub repo
+    "DannDot/nvim-timetracker",
     config = function()
       require("timetracker").setup()
     end,
@@ -40,7 +40,7 @@ Add to your Packer config:
 
 ```lua
 use {
-  "DannDot/nvim-timetracker", -- Replace with your GitHub repo
+  "DannDot/nvim-timetracker",
   config = function()
     require("timetracker").setup()
   end,
