@@ -15,6 +15,12 @@ M.config = {
 	auto_gitignore        = false, -- automatically adds to gitignore
 	show_session_on_start = false, -- show current session on startup
 	name                  = nil, -- override user identifier
+	highlight_groups      = { -- Customizable highlight groups for UI
+		Header = { fg = '#61afef', bold = true },
+		Total = { fg = '#98c379', italic = true },
+		SessionLine = { fg = '#dcdfe4' },
+		CurrentTimer = { fg = '#e06c75', bg = '#282c34', bold = true },
+	},
 }
 
 -- Internal state
@@ -24,6 +30,7 @@ local state = {
 	timer_handle = nil,
 	win_id       = nil,
 	buf_id       = nil,
+	namespace_id = vim.api.nvim_create_namespace('timetracker'),
 }
 
 -- Helpers
@@ -87,6 +94,12 @@ function M.setup(opts)
 		end
 	end
 
+	-- Define highlight groups
+	vim.api.nvim_set_hl(0, 'TimeTrackerHeader', M.config.highlight_groups.Header)
+	vim.api.nvim_set_hl(0, 'TimeTrackerTotal', M.config.highlight_groups.Total)
+	vim.api.nvim_set_hl(0, 'TimeTrackerSessionLine', M.config.highlight_groups.SessionLine)
+	vim.api.nvim_set_hl(0, 'TimeTrackerCurrentTimer', M.config.highlight_groups.CurrentTimer)
+
 	-- user commands
 	vim.api.nvim_create_user_command('TimeTrackerStart', M.StartTimer, {})
 	vim.api.nvim_create_user_command('TimeTrackerStop', M.StopTimer, {})
@@ -115,7 +128,7 @@ end
 
 function M.StartTimer()
 	if state.current then
-		print('Timer is already running.')
+		vim.notify('Timer is already running.', vim.log.levels.WARN)
 		return
 	end
 	local now = os.time()
@@ -124,17 +137,17 @@ function M.StartTimer()
 		user_id    = get_user_id(),
 		branch     = get_git_branch(),
 	}
-	print(string.format(
+	vim.notify(string.format(
 		'Timer started at %s (user: %s, branch: %s)',
 		os.date('%X', now),
 		state.current.user_id,
 		state.current.branch or 'none'
-	))
+	), vim.log.levels.INFO)
 end
 
 function M.StopTimer()
 	if not state.current then
-		print('No timer is running.')
+		vim.notify('No timer is running.', vim.log.levels.WARN)
 		return
 	end
 	local now   = os.time()
@@ -144,17 +157,17 @@ function M.StopTimer()
 	table.insert(state.sessions, s)
 	save_sessions(state.sessions)
 	state.current = nil
-	print(string.format(
+	vim.notify(string.format(
 		'Timer stopped. User: %s, Branch: %s, Elapsed: %d seconds (logged to %s)',
 		s.user_id, s.branch or 'none', s.elapsed, get_storage_file()
-	))
+	), vim.log.levels.INFO)
 end
 
 function M.ShowSessions()
 	local buf = vim.api.nvim_create_buf(false, true)
 	local lines = {
-		'',
-		'',
+		'TimeTracker Sessions',
+		'--------------------',
 		string.format('%-3s %-19s %-19s %-6s %-10s %s',
 			'#', 'Start', 'Stop', 'Mins', 'User', 'Branch')
 	}
@@ -169,14 +182,21 @@ function M.ShowSessions()
 			i, starts, stops, mins, s.user_id, s.branch or '-'
 		)
 	end
-	lines[1] = string.format(
+	table.insert(lines, 2, string.format(
 		'Total sessions: %d   Total time: %.2f mins',
 		#state.sessions, total / 60
-	)
+	))
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
+	-- Apply highlights
+	vim.api.nvim_buf_add_highlight(buf, state.namespace_id, 'TimeTrackerHeader', 0, 0, -1)
+	vim.api.nvim_buf_add_highlight(buf, state.namespace_id, 'TimeTrackerTotal', 1, 0, -1)
+	for i = 3, #lines - 1 do
+		vim.api.nvim_buf_add_highlight(buf, state.namespace_id, 'TimeTrackerSessionLine', i, 0, -1)
+	end
+
 	local w = math.floor(vim.o.columns * 0.8)
-	local h = math.floor(vim.o.lines * 0.6)
+	local h = math.min(math.floor(vim.o.lines * 0.6), #lines + 2)
 	local r = math.floor((vim.o.lines - h) / 2)
 	local c = math.floor((vim.o.columns - w) / 2)
 	local win = vim.api.nvim_open_win(buf, true, {
@@ -186,9 +206,14 @@ function M.ShowSessions()
 		row = r,
 		col = c,
 		style = 'minimal',
-		border = 'rounded'
+		border = 'rounded',
+		title = 'TimeTracker Sessions',
+		title_pos = 'center',
 	})
 	vim.api.nvim_win_set_option(win, 'cursorline', true)
+	vim.api.nvim_win_set_option(win, 'number', false)
+	vim.api.nvim_win_set_option(win, 'relativenumber', false)
+	vim.api.nvim_win_set_option(win, 'signcolumn', 'no')
 	vim.api.nvim_buf_set_keymap(buf, 'n', 'q', '<cmd>bd!<CR>', { noremap = true, silent = true })
 	vim.api.nvim_buf_set_keymap(buf, 'n', '<Esc>', '<cmd>bd!<CR>', { noremap = true, silent = true })
 end
@@ -196,7 +221,7 @@ end
 function M.ShowCurrentSession()
 	-- If there is no active timer
 	if not state.current then
-		print("No active timer to display")
+		vim.notify("No active timer to display", vim.log.levels.WARN)
 		return
 	end
 	-- If there is already a timer window open
@@ -212,33 +237,33 @@ function M.ShowCurrentSession()
 	end
 	local function get_text()
 		local elapsed = os.time() - state.current.start_time
-		return string.format('Elapsed: %02d:%02d:%02d', math.floor(elapsed / 3600), math.floor(elapsed / 60), elapsed %
-		60)
+		return string.format('⏱️  %02d:%02d:%02d', math.floor(elapsed / 3600), math.floor((elapsed % 3600) / 60), elapsed % 60)
 	end
 	local text = get_text()
-	local w = #text
+	local w = #text + 4 -- Padding for borders/aesthetics
 	local h = 1
 	-- Create buffer/window
 	state.buf_id = vim.api.nvim_create_buf(false, true)
 	local ui = vim.api.nvim_list_uis()[1]
 	local row = ui.height - 3
-	local col = ui.width - w
+	local col = ui.width - w - 2
 	state.win_id = vim.api.nvim_open_win(state.buf_id, false, {
 		relative = 'editor',
 		width = w,
 		height = h,
 		row = row,
 		col = col,
-		style = 'minimal'
+		style = 'minimal',
+		border = 'single',
 	})
+	vim.api.nvim_win_set_option(state.win_id, 'winhl', 'NormalFloat:TimeTrackerCurrentTimer')
 	-- Update function for the timer window
 	local function update()
 		if not state.current or not vim.api.nvim_win_is_valid(state.win_id) then return end
 		local new_text = get_text()
 		vim.api.nvim_buf_set_lines(state.buf_id, 0, -1, false, { new_text })
-		local new_width = #text
-		vim.api.nvim_win_set_width(state.win_id, new_width)
-		vim.api.nvim_win_set_config(state.win_id, { relative = 'editor', row = row, col = ui.width - new_width })
+		local new_width = #new_text + 4
+		vim.api.nvim_win_set_config(state.win_id, { relative = 'editor', width = new_width, row = row, col = ui.width - new_width - 2 })
 	end
 	-- Initial update
 	update()
